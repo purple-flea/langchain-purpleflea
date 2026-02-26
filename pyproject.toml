@@ -1,20 +1,27 @@
 [build-system]
-requires = ["setuptools>=68.0", "wheel"]
+requires = ["setuptools>=61.0,<70.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "langchain-purpleflea"
-version = "0.1.0"
-description = "LangChain tool integrations for the Purple Flea Casino & Trading APIs"
+version = "0.1.1"
+description = "LangChain tools for Purple Flea — casino, trading, wallet, and domain APIs for AI agents"
 readme = "README.md"
-license = "MIT"
+license = {text = "MIT"}
 requires-python = ">=3.10"
 authors = [
     { name = "Purple Flea", email = "dev@purpleflea.com" },
 ]
+keywords = [
+    "langchain", "ai-agents", "crypto", "casino", "trading",
+    "wallet", "domains", "mcp", "autonomous", "hyperliquid",
+    "perpetual-futures", "defi", "langchain-tools",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Office/Business :: Financial :: Investment",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -34,9 +41,9 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Purple-flea/langchain-purpleflea"
-Repository = "https://github.com/Purple-flea/langchain-purpleflea"
-Issues = "https://github.com/Purple-flea/langchain-purpleflea/issues"
+Homepage = "https://purpleflea.com"
+Repository = "https://github.com/purple-flea/langchain-purpleflea"
+Issues = "https://github.com/purple-flea/langchain-purpleflea/issues"
 
 [tool.setuptools.packages.find]
 include = ["langchain_purpleflea*"]

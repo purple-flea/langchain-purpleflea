@@ -18,6 +18,9 @@ from langchain_purpleflea.trading import (
     TradingListPositions,
     TradingOpenPosition,
 )
+from langchain_purpleflea.wallet import BalanceTool, SwapTool, WalletTool
+from langchain_purpleflea.domains import DomainSearchTool, DomainPurchaseTool, DNSTool
+from langchain_purpleflea.toolkit import PurpleFleatoolkit
 
 __all__ = [
     # Casino
@@ -36,6 +39,16 @@ __all__ = [
     "TradingListMarkets",
     "TradingListPositions",
     "TradingOpenPosition",
+    # Wallet
+    "WalletTool",
+    "SwapTool",
+    "BalanceTool",
+    # Domains
+    "DomainSearchTool",
+    "DomainPurchaseTool",
+    "DNSTool",
+    # Toolkit
+    "PurpleFleatoolkit",
 ]
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
