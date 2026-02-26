@@ -1,177 +1,195 @@
-"""LangChain tools for the Purple Flea Wallet & Swap API."""
-
-from __future__ import annotations
+"""Purple Flea Wallet tools for LangChain agents."""
 
 import json
-import urllib.request
-import urllib.error
-from typing import Any, Optional, Type
-
-from langchain_core.tools import BaseTool
+import requests
+from typing import Optional, Type
+from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
 
-BASE_URL = "https://wallet.purpleflea.com"
 
-
-def _post(base_url: str, path: str, api_key: str, payload: dict) -> dict:
-    url = f"{base_url.rstrip('/')}{path}"
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        url, data=data,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
+class WalletInput(BaseModel):
+    action: str = Field(
+        description="Action: create, deposit_addresses, transactions, referral_stats"
     )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        return {"error": e.reason, "status": e.code, "body": e.read().decode()}
-
-
-def _get(base_url: str, path: str, api_key: str) -> dict:
-    url = f"{base_url.rstrip('/')}{path}"
-    req = urllib.request.Request(
-        url,
-        headers={"Authorization": f"Bearer {api_key}"},
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        return {"error": e.reason, "status": e.code, "body": e.read().decode()}
-
-
-# ---------------------------------------------------------------------------
-# Input schemas
-# ---------------------------------------------------------------------------
-
-
-class WalletCreateInput(BaseModel):
-    chain: str = Field(
-        description=(
-            "The blockchain to create a wallet on. Supported: 'ethereum', 'bitcoin', "
-            "'solana', 'tron', 'polygon', 'arbitrum', 'base', 'bnb'."
-        )
-    )
-    label: Optional[str] = Field(
-        default=None,
-        description="Optional human-readable label for the wallet.",
-    )
-    referral_code: Optional[str] = Field(
-        default=None,
-        description="Referral code of the agent who referred you. Earns them 10% of your swap fees forever.",
-    )
-
-
-class WalletBalanceInput(BaseModel):
-    wallet_id: str = Field(description="The wallet ID to check balance for.")
 
 
 class SwapInput(BaseModel):
-    wallet_id: str = Field(description="The wallet ID to execute the swap from.")
-    from_token: str = Field(
-        description="The token to swap from (e.g. 'ETH', 'USDC', 'BTC', 'SOL')."
-    )
-    to_token: str = Field(
-        description="The token to swap to (e.g. 'USDC', 'ETH', 'SOL', 'BTC')."
-    )
-    amount: float = Field(
-        description="The amount of from_token to swap. Must be a positive number."
-    )
-    slippage: Optional[float] = Field(
-        default=0.5,
-        description="Maximum acceptable slippage percentage (default 0.5%). Range: 0.1–5.0.",
-    )
+    from_chain: str = Field(description="Source chain (ethereum, base, solana, bitcoin, polygon, arbitrum)")
+    from_token: str = Field(description="Source token (USDC, ETH, SOL, BTC, USDT)")
+    to_chain: str = Field(description="Destination chain")
+    to_token: str = Field(description="Destination token")
+    amount: float = Field(description="Amount to swap")
 
 
 class BalanceInput(BaseModel):
-    address: str = Field(description="The blockchain address to check balance for.")
-    chain: str = Field(
-        description="The blockchain (e.g. 'ethereum', 'bitcoin', 'solana')."
+    chain: Optional[str] = Field(
+        default=None,
+        description="Chain to check (ethereum, base, solana, bitcoin). Leave empty for all balances."
     )
-
-
-# ---------------------------------------------------------------------------
-# Tools
-# ---------------------------------------------------------------------------
 
 
 class WalletTool(BaseTool):
-    """Create a new multi-chain HD wallet on Purple Flea."""
+    """LangChain tool for Purple Flea multi-chain HD wallet management."""
 
-    name: str = "purpleflea_wallet_create"
+    name: str = "purple_flea_wallet"
     description: str = (
-        "Create a new HD (hierarchical deterministic) wallet on Purple Flea for any supported chain. "
-        "Supported chains: Ethereum, Bitcoin, Solana, Tron, Polygon, Arbitrum, Base, BNB Chain. "
-        "Returns wallet ID, public address, and derivation path. "
-        "The wallet is non-custodial — only you hold the private keys. "
-        "Use this when you need a fresh blockchain address for receiving funds, executing swaps, "
-        "or storing assets autonomously."
+        "Manage your Purple Flea multi-chain HD wallet. "
+        "Supports Ethereum, Base, Arbitrum, Optimism, Polygon, Solana, Bitcoin, Lightning, Monero. "
+        "Get deposit addresses for any supported chain and token. "
+        "Your casino and trading accounts are all funded through this unified wallet. "
+        "Actions: create (new wallet), deposit_addresses (get all chain addresses), "
+        "transactions (transaction history), referral_stats (swap fee earnings)"
     )
-    args_schema: Type[BaseModel] = WalletCreateInput
-    api_key: str = ""
-    base_url: str = BASE_URL
+    args_schema: Type[BaseModel] = WalletInput
+    return_direct: bool = False
 
-    def _run(self, chain: str, label: Optional[str] = None, referral_code: Optional[str] = None) -> str:
-        payload: dict[str, Any] = {"chain": chain}
-        if label:
-            payload["label"] = label
-        if referral_code:
-            payload["referral_code"] = referral_code
-        result = _post(self.base_url, "/v1/wallets", self.api_key, payload)
-        return json.dumps(result)
+    api_key: Optional[str] = None
+    referral_code: Optional[str] = None
+    base_url: str = "https://wallet.purpleflea.com/v1"
+
+    def __init__(self, api_key: Optional[str] = None, referral_code: Optional[str] = None,
+                 base_url: str = "https://wallet.purpleflea.com/v1", **kwargs):
+        super().__init__(**kwargs)
+        self.api_key = api_key
+        self.referral_code = referral_code
+        self.base_url = base_url
+
+    def _headers(self):
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def _run(self, action: str) -> str:
+        try:
+            if action == "create":
+                payload = {}
+                if self.referral_code:
+                    payload["referral_code"] = self.referral_code
+                r = requests.post(f"{self.base_url}/wallet/create",
+                                  json=payload, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "deposit_addresses":
+                r = requests.get(f"{self.base_url}/wallet/addresses",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "transactions":
+                r = requests.get(f"{self.base_url}/wallet/transactions",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "referral_stats":
+                r = requests.get(f"{self.base_url}/referral/stats",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            else:
+                return json.dumps({"error": f"Unknown action: {action}"})
+
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Request failed: {str(e)}"})
+        except Exception as e:
+            return json.dumps({"error": f"Unexpected error: {str(e)}"})
 
 
 class SwapTool(BaseTool):
-    """Execute a token swap via Purple Flea Wallet."""
+    """LangChain tool for cross-chain token swaps via Purple Flea Wallet."""
 
-    name: str = "purpleflea_wallet_swap"
+    name: str = "purple_flea_swap"
     description: str = (
-        "Execute a token swap using a Purple Flea wallet. "
-        "Swap between any supported tokens: ETH, BTC, SOL, USDC, USDT, and 500+ others. "
-        "Uses best-rate routing across DEXes (Uniswap, Jupiter, etc). "
-        "Returns the swap transaction hash, output amount received, and effective rate. "
-        "A 10% commission is earned by your referrer on each swap fee. "
-        "Use this to rebalance holdings, convert profits to stablecoins, or acquire assets."
+        "Execute cross-chain token swaps via Purple Flea Wallet (powered by Wagyu). "
+        "Swap between any supported chains and tokens: "
+        "Chains: ethereum, base, arbitrum, optimism, polygon, solana, bitcoin. "
+        "Tokens: USDC, USDT, ETH, SOL, BTC, MATIC. "
+        "Get a quote first, then execute. Agents who referred you earn 10% of swap fees."
     )
     args_schema: Type[BaseModel] = SwapInput
-    api_key: str = ""
-    base_url: str = BASE_URL
+    return_direct: bool = False
 
-    def _run(
-        self,
-        wallet_id: str,
-        from_token: str,
-        to_token: str,
-        amount: float,
-        slippage: float = 0.5,
-    ) -> str:
-        payload = {
-            "wallet_id": wallet_id,
-            "from_token": from_token,
-            "to_token": to_token,
-            "amount": amount,
-            "slippage": slippage,
-        }
-        result = _post(self.base_url, "/v1/swap", self.api_key, payload)
-        return json.dumps(result)
+    api_key: Optional[str] = None
+    base_url: str = "https://wallet.purpleflea.com/v1"
+
+    def __init__(self, api_key: Optional[str] = None,
+                 base_url: str = "https://wallet.purpleflea.com/v1", **kwargs):
+        super().__init__(**kwargs)
+        self.api_key = api_key
+        self.base_url = base_url
+
+    def _headers(self):
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def _run(self, from_chain: str, from_token: str, to_chain: str,
+             to_token: str, amount: float) -> str:
+        try:
+            quote_payload = {
+                "from_chain": from_chain,
+                "from_token": from_token,
+                "to_chain": to_chain,
+                "to_token": to_token,
+                "amount": amount,
+            }
+            quote_r = requests.post(f"{self.base_url}/swap/quote",
+                                    json=quote_payload, headers=self._headers(), timeout=30)
+            quote = quote_r.json()
+
+            exec_r = requests.post(f"{self.base_url}/swap/execute",
+                                   json=quote_payload, headers=self._headers(), timeout=60)
+            return json.dumps({"quote": quote, "execution": exec_r.json()}, indent=2)
+
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Request failed: {str(e)}"})
+        except Exception as e:
+            return json.dumps({"error": f"Unexpected error: {str(e)}"})
 
 
 class BalanceTool(BaseTool):
-    """Check the token balance of any blockchain address."""
+    """LangChain tool for checking Purple Flea balances across all services."""
 
-    name: str = "purpleflea_wallet_balance"
+    name: str = "purple_flea_balance"
     description: str = (
-        "Check the token balance of any blockchain address via Purple Flea Wallet API. "
-        "Returns native token balance plus all ERC-20/SPL token balances with USD values. "
-        "Works on Ethereum, Bitcoin, Solana, Tron, Polygon, Arbitrum, Base, and BNB Chain. "
-        "Use this to monitor wallet balances, verify deposits, or assess your portfolio value."
+        "Check your Purple Flea balances. Queries the casino balance (USD) "
+        "and wallet addresses for depositing funds. Use chain parameter to filter "
+        "to a specific chain, or leave empty to see all addresses."
     )
     args_schema: Type[BaseModel] = BalanceInput
-    api_key: str = ""
-    base_url: str = BASE_URL
+    return_direct: bool = False
 
-    def _run(self, address: str, chain: str) -> str:
-        result = _get(self.base_url, f"/v1/balance/{chain}/{address}", self.api_key)
-        return json.dumps(result)
+    api_key: Optional[str] = None
+    casino_base_url: str = "https://casino.purpleflea.com/api/v1"
+
+    def __init__(self, api_key: Optional[str] = None,
+                 casino_base_url: str = "https://casino.purpleflea.com/api/v1", **kwargs):
+        super().__init__(**kwargs)
+        self.api_key = api_key
+        self.casino_base_url = casino_base_url
+
+    def _headers(self):
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def _run(self, chain: Optional[str] = None) -> str:
+        try:
+            balance_r = requests.get(f"{self.casino_base_url}/auth/balance",
+                                     headers=self._headers(), timeout=30)
+            balance_data = balance_r.json()
+
+            chains_r = requests.get(f"{self.casino_base_url}/auth/supported-chains",
+                                    headers=self._headers(), timeout=30)
+            chains_data = chains_r.json()
+
+            return json.dumps({
+                "casino_balance": balance_data,
+                "supported_chains": chains_data,
+            }, indent=2)
+
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Request failed: {str(e)}"})
+        except Exception as e:
+            return json.dumps({"error": f"Unexpected error: {str(e)}"})

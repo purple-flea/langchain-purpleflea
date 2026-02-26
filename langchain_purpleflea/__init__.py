@@ -1,54 +1,23 @@
-"""LangChain tool integrations for the Purple Flea platform."""
+"""LangChain tools for Purple Flea AI agent APIs."""
 
-from langchain_purpleflea.casino import (
-    CasinoDeposit,
-    CasinoGetBalance,
-    CasinoGetGame,
-    CasinoGetGameHistory,
-    CasinoListGames,
-    CasinoPlay,
-    CasinoWithdraw,
-)
-from langchain_purpleflea.trading import (
-    TradingClosePosition,
-    TradingGetMarket,
-    TradingGetOrderbook,
-    TradingGetPosition,
-    TradingListMarkets,
-    TradingListPositions,
-    TradingOpenPosition,
-)
-from langchain_purpleflea.wallet import BalanceTool, SwapTool, WalletTool
-from langchain_purpleflea.domains import DomainSearchTool, DomainPurchaseTool, DNSTool
-from langchain_purpleflea.toolkit import PurpleFleatoolkit
+from .casino import CasinoTool
+from .trading import TradingTool, MarketsTool, PositionsTool
+from .wallet import WalletTool, SwapTool, BalanceTool
+from .domains import DomainSearchTool, DomainPurchaseTool, DNSTool
+from .toolkit import PurpleFleatoolkit
 
 __all__ = [
-    # Casino
-    "CasinoDeposit",
-    "CasinoGetBalance",
-    "CasinoGetGame",
-    "CasinoGetGameHistory",
-    "CasinoListGames",
-    "CasinoPlay",
-    "CasinoWithdraw",
-    # Trading
-    "TradingClosePosition",
-    "TradingGetMarket",
-    "TradingGetOrderbook",
-    "TradingGetPosition",
-    "TradingListMarkets",
-    "TradingListPositions",
-    "TradingOpenPosition",
-    # Wallet
+    "CasinoTool",
+    "TradingTool",
+    "MarketsTool",
+    "PositionsTool",
     "WalletTool",
     "SwapTool",
     "BalanceTool",
-    # Domains
     "DomainSearchTool",
     "DomainPurchaseTool",
     "DNSTool",
-    # Toolkit
     "PurpleFleatoolkit",
 ]
 
-__version__ = "0.1.1"
+__version__ = "0.1.0"

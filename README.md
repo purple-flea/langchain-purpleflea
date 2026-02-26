@@ -1,156 +1,167 @@
 # langchain-purpleflea
 
-LangChain tools for [Purple Flea](https://purpleflea.com) — casino, trading, wallet, and domain APIs built for autonomous AI agents.
+LangChain tools for Purple Flea — casino, trading, wallet, and domain APIs for AI agents.
 
-## Installation
+## Install
 
 ```bash
 pip install langchain-purpleflea
 ```
 
-## What's Inside
-
-| Module | Tools | Description |
-|--------|-------|-------------|
-| `casino` | 7 tools | Provably fair games: coin flip, dice, roulette, crash |
-| `trading` | 7 tools | 275+ perpetual futures markets via Hyperliquid (1-50x leverage) |
-| `wallet` | 3 tools | Non-custodial HD wallets + best-rate DEX swaps |
-| `domains` | 3 tools | Register .ai/.com/.io domains, manage DNS |
-| `toolkit` | all | `PurpleFleatoolkit` bundles everything |
-
-## Quickstart — Toolkit
+## Quick Start
 
 ```python
 from langchain_purpleflea import PurpleFleatoolkit
 from langchain.agents import initialize_agent, AgentType
 from langchain_openai import ChatOpenAI
 
+# Initialize toolkit with your credentials
 toolkit = PurpleFleatoolkit(
-    api_key="sk_live_...",
-    referral_code="YOUR_CODE",   # earn 10-20% of fees from agents you refer
+    api_key="sk_live_your_key",           # Casino + Wallet API key
+    trading_api_key="sk_trade_your_key",  # Trading API key
+    referral_code="ref_yourcode",         # Optional: earn on referred agents
 )
+
+# Get all tools
 tools = toolkit.get_tools()
 
+# Create agent
+llm = ChatOpenAI(model="gpt-4o")
 agent = initialize_agent(
-    tools,
-    ChatOpenAI(model="gpt-4o"),
+    tools, llm,
     agent=AgentType.OPENAI_FUNCTIONS,
-    verbose=True,
+    verbose=True
 )
-agent.run("Check my casino balance, scan trading markets for opportunities, and list my open positions")
+
+# Run
+agent.run("Register a casino account, deposit to base chain, then play 3 coin flips at $2 each")
 ```
 
-## Quickstart — Individual Tools
+## Registration
+
+Agents register automatically when calling `action="register"` on any tool:
 
 ```python
-from langchain_purpleflea import (
-    CasinoPlay, CasinoGetBalance, CasinoListGames,
-    TradingOpenPosition, TradingListMarkets, TradingClosePosition, TradingListPositions,
-    WalletTool, SwapTool, BalanceTool,
-    DomainSearchTool, DomainPurchaseTool,
-)
+from langchain_purpleflea import CasinoTool
 
-API_KEY = "sk_live_..."
-
-tools = [
-    CasinoGetBalance(api_key=API_KEY),
-    CasinoListGames(api_key=API_KEY),
-    CasinoPlay(api_key=API_KEY),
-    TradingListMarkets(api_key=API_KEY),
-    TradingOpenPosition(api_key=API_KEY),
-    TradingListPositions(api_key=API_KEY),
-    TradingClosePosition(api_key=API_KEY),
-    WalletTool(api_key=API_KEY),
-    SwapTool(api_key=API_KEY),
-    BalanceTool(api_key=API_KEY),
-    DomainSearchTool(api_key=API_KEY),
-    DomainPurchaseTool(api_key=API_KEY),
-]
+tool = CasinoTool(referral_code="ref_1234abcd")
+result = tool._run(action="register")
+# Returns: { "api_key": "sk_live_...", "referral_code": "ref_...", "balance": 0 }
 ```
 
-## Tool Reference
+## Tools
 
-### Casino Tools
-
-| Tool | name | Description |
-|------|------|-------------|
-| `CasinoPlay` | `purpleflea_casino_play` | Play a game round (coin flip, dice, roulette, crash) |
-| `CasinoGetBalance` | `purpleflea_casino_get_balance` | Check casino wallet balance |
-| `CasinoDeposit` | `purpleflea_casino_deposit` | Deposit funds |
-| `CasinoWithdraw` | `purpleflea_casino_withdraw` | Withdraw funds |
-| `CasinoListGames` | `purpleflea_casino_list_games` | List available games with house edges |
-| `CasinoGetGame` | `purpleflea_casino_get_game` | Get rules and payout info for a game |
-| `CasinoGetGameHistory` | `purpleflea_casino_get_game_history` | Retrieve past bets and outcomes |
-
-### Trading Tools
-
-| Tool | name | Description |
-|------|------|-------------|
-| `TradingOpenPosition` | `purpleflea_trading_open_position` | Open long/short position (1-50x leverage) |
-| `TradingClosePosition` | `purpleflea_trading_close_position` | Close a position and realize P&L |
-| `TradingGetPosition` | `purpleflea_trading_get_position` | Get unrealized P&L, entry price, margin |
-| `TradingListPositions` | `purpleflea_trading_list_positions` | List all open/closed positions |
-| `TradingListMarkets` | `purpleflea_trading_list_markets` | Browse 275+ markets with prices and volume |
-| `TradingGetMarket` | `purpleflea_trading_get_market` | Get funding rate, OI, price for a market |
-| `TradingGetOrderbook` | `purpleflea_trading_get_orderbook` | Get bids/asks depth for a market |
-
-### Wallet Tools
-
-| Tool | name | Description |
-|------|------|-------------|
-| `WalletTool` | `purpleflea_wallet_create` | Create HD wallet on any chain |
-| `SwapTool` | `purpleflea_wallet_swap` | Swap tokens at best DEX rate |
-| `BalanceTool` | `purpleflea_wallet_balance` | Check any address's token balances |
-
-### Domain Tools
-
-| Tool | name | Description |
-|------|------|-------------|
-| `DomainSearchTool` | `purpleflea_domain_search` | Search availability across 500+ TLDs |
-| `DomainPurchaseTool` | `purpleflea_domain_purchase` | Register a domain |
-| `DNSTool` | `purpleflea_domain_add_dns_record` | Add A/CNAME/TXT/MX DNS records |
-
-## Referral Program
-
-Every Purple Flea product has a referral program. Agents earn:
-
-- **Casino**: 10% of referred agents' net losses
-- **Trading**: 20% of referred agents' trading fees — forever
-- **Wallet**: 10% of referred agents' swap fees
-
-Pass `referral_code` to `PurpleFleatoolkit` or embed it in `WalletTool`/`DomainPurchaseTool` calls to activate.
-
-## CrewAI Example
+### Casino (8 games, 0.5% house edge)
 
 ```python
-from crewai import Agent, Task, Crew
-from langchain_purpleflea import PurpleFleatoolkit
+from langchain_purpleflea import CasinoTool
 
-tools = PurpleFleatoolkit(api_key="sk_live_...").get_tools()
+casino = CasinoTool(api_key="sk_live_...")
 
-trader = Agent(
-    role="Autonomous Trader",
-    goal="Monitor 275 markets and execute profitable perpetual futures trades",
-    backstory="You are a quantitative trader with access to all Hyperliquid markets via Purple Flea.",
-    tools=tools,
+# Check balance
+casino._run(action="balance")
+
+# Play coin flip
+casino._run(action="play_coin_flip", amount=5.0, game_params={"side": "heads"})
+
+# Play dice
+casino._run(action="play_dice", amount=2.0, game_params={"threshold": 50, "direction": "over"})
+
+# Crash game
+casino._run(action="play_crash", amount=10.0, game_params={"cashout_multiplier": 2.5})
+
+# Kelly Criterion optimal bet
+casino._run(action="kelly_optimal", game_params={"game": "coin_flip", "win_probability": 0.495})
+
+# Referral earnings
+casino._run(action="referral_stats")
+```
+
+### Trading (275+ perpetuals via Hyperliquid)
+
+```python
+from langchain_purpleflea import TradingTool, MarketsTool
+
+# Register (one-time, requires Hyperliquid wallet)
+trading = TradingTool(referral_code="ref_...")
+trading._run(
+    action="register",
+    hl_wallet_address="0x...",
+    hl_signing_key="0x..."
 )
 
-task = Task(
-    description="Identify the top trending market and open a $100 long position with 5x leverage.",
-    expected_output="Position ID, entry price, and liquidation price.",
-    agent=trader,
-)
+# Open position
+trading = TradingTool(api_key="sk_trade_...")
+trading._run(action="open_position", coin="TSLA", side="long", size_usd=1000, leverage=5)
 
-Crew(agents=[trader], tasks=[task]).kickoff()
+# Browse markets
+markets = MarketsTool(api_key="sk_trade_...")
+markets._run(category="stocks")  # or "crypto", "commodities", "forex"
+markets._run(coin="BTC")         # specific market
+```
+
+### Wallet (multi-chain, 9 networks)
+
+```python
+from langchain_purpleflea import BalanceTool, SwapTool
+
+# Check balance + deposit addresses
+balance = BalanceTool(api_key="sk_live_...")
+balance._run()
+
+# Cross-chain swap
+swap = SwapTool(api_key="sk_live_...")
+swap._run(from_chain="ethereum", from_token="ETH", to_chain="base", to_token="USDC", amount=0.1)
+```
+
+### Domains (via Njalla, privacy-first)
+
+```python
+from langchain_purpleflea import DomainSearchTool, DomainPurchaseTool, DNSTool
+
+# Search availability
+search = DomainSearchTool(api_key="your_key")
+search._run(query="myagent.ai")
+
+# Register domain
+purchase = DomainPurchaseTool(api_key="your_key")
+purchase._run(action="register", domain="myagent.ai")
+
+# Add DNS record
+dns = DNSTool(api_key="your_key")
+dns._run(action="add", domain_id="dom_123", record_type="A", name="@", content="1.2.3.4")
+```
+
+## Referral System
+
+All tools accept a `referral_code` parameter. When you refer other agents:
+
+- **Casino**: Earn 10% of their net losses (forever)
+- **Trading**: Earn 20% of their trading fees (forever)
+- **Wallet**: Earn 10% of their swap fees
+- **Domains**: Earn 15% of their domain purchases
+
+3-level chain: you earn on your referrals, and on their referrals, recursively.
+
+Get your referral code after registration:
+```python
+casino._run(action="referral_stats")  # includes your_referral_code field
+```
+
+## Subset Toolkits
+
+```python
+toolkit = PurpleFleatoolkit(api_key="sk_live_...")
+
+casino_tools = toolkit.get_casino_tools()
+trading_tools = toolkit.get_trading_tools()
+wallet_tools = toolkit.get_wallet_tools()
+domain_tools = toolkit.get_domain_tools()
 ```
 
 ## Links
 
 - [Purple Flea](https://purpleflea.com)
-- [API Docs](https://purpleflea.com/docs)
-- [GitHub](https://github.com/purple-flea/langchain-purpleflea)
-- [PyPI](https://pypi.org/project/langchain-purpleflea/)
-
-## License
-
-MIT
+- [Casino API docs](https://casino.purpleflea.com/docs)
+- [Trading API docs](https://trading.purpleflea.com/docs)
+- [For Agents guide](https://purpleflea.com/for-agents)

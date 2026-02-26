@@ -1,212 +1,157 @@
-"""LangChain tools for the Purple Flea Casino API."""
-
-from __future__ import annotations
+"""Purple Flea Casino tools for LangChain agents."""
 
 import json
-from typing import Any, Optional, Type
-
-from langchain_core.tools import BaseTool
+import requests
+from typing import Optional, Type
+from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
-from purpleflea import CasinoClient
 
 
-def _client(api_key: str, base_url: str | None = None) -> CasinoClient:
-    return CasinoClient(api_key, base_url=base_url)
-
-
-# ---------------------------------------------------------------------------
-# Input schemas
-# ---------------------------------------------------------------------------
-
-
-class CasinoPlayInput(BaseModel):
-    game_id: str = Field(
-        description="The ID of the casino game to play (e.g. 'coin_flip', 'dice', 'roulette', 'crash')."
-    )
-    bet_amount: float = Field(
-        description="The amount to wager in USD. Must be a positive number."
-    )
-    options: Optional[dict[str, Any]] = Field(
-        default=None,
+class CasinoInput(BaseModel):
+    action: str = Field(
         description=(
-            "Game-specific options as a JSON object. Examples: "
-            '{"side": "heads"} for coin flip, '
-            '{"target": 50, "direction": "over"} for dice, '
-            '{"bet_type": "red"} for roulette.'
-        ),
+            "Action to perform. One of: register, balance, play_coin_flip, play_dice, "
+            "play_multiplier, play_roulette, play_crash, play_plinko, deposit_address, "
+            "withdraw, referral_stats, kelly_optimal, simulate, verify_bet, leaderboard"
+        )
     )
+    amount: Optional[float] = Field(default=None, description="Bet amount in USD")
+    game_params: Optional[dict] = Field(default=None, description="Game-specific parameters as dict")
+    bet_id: Optional[str] = Field(default=None, description="Bet ID for verification")
+    chain: Optional[str] = Field(default=None, description="Chain for deposit (base, ethereum, solana, bitcoin)")
 
 
-class CasinoDepositInput(BaseModel):
-    amount: float = Field(description="The amount to deposit in the given currency.")
-    currency: str = Field(
-        default="USD",
-        description="The currency to deposit (e.g. 'USD', 'USDC', 'ETH', 'BTC').",
-    )
+class CasinoTool(BaseTool):
+    """LangChain tool for interacting with Purple Flea Casino.
 
+    Gives AI agents access to provably fair casino games with 0.5% house edge.
+    Agents can register, play 8 different games, manage their bankroll with
+    Kelly Criterion, verify fairness, and earn referral commissions.
+    """
 
-class CasinoWithdrawInput(BaseModel):
-    amount: float = Field(description="The amount to withdraw in the given currency.")
-    currency: str = Field(
-        default="USD",
-        description="The currency to withdraw (e.g. 'USD', 'USDC', 'ETH', 'BTC').",
-    )
-
-
-class GameIdInput(BaseModel):
-    game_id: str = Field(description="The unique identifier of the casino game.")
-
-
-class GameHistoryInput(BaseModel):
-    limit: Optional[int] = Field(
-        default=None, description="Maximum number of history entries to return."
-    )
-    game_id: Optional[str] = Field(
-        default=None, description="Filter history to a specific game ID."
-    )
-
-
-# ---------------------------------------------------------------------------
-# Tools
-# ---------------------------------------------------------------------------
-
-
-class CasinoPlay(BaseTool):
-    """Play a casino game on the Purple Flea platform."""
-
-    name: str = "purpleflea_casino_play"
+    name: str = "purple_flea_casino"
     description: str = (
-        "Place a bet and play a round of a Purple Flea casino game. "
-        "Supports coin flip, dice, roulette, crash, and custom-odds games. "
-        "All games are provably fair with cryptographic verification. "
-        "Returns the game result, payout amount, and a fairness proof hash. "
-        "You MUST specify game_id and bet_amount. Optionally pass game-specific "
-        "options (e.g. side for coin flip, target for dice)."
+        "Access Purple Flea Casino — provably fair gambling with 0.5% house edge. "
+        "Register a free account, deposit USDC/crypto, and play: coin flip (1.96x), "
+        "dice (variable odds), crash (up to 1000x), roulette, plinko, and more. "
+        "Uses Kelly Criterion for optimal bet sizing. Earn passive income by referring "
+        "other agents — you receive 10% of their net losses forever. "
+        "Actions: register, balance, play_coin_flip, play_dice, play_multiplier, "
+        "play_roulette, play_crash, play_plinko, deposit_address, withdraw, "
+        "referral_stats, kelly_optimal, simulate, verify_bet, leaderboard"
     )
-    args_schema: Type[BaseModel] = CasinoPlayInput
-    api_key: str = ""
-    base_url: Optional[str] = None
+    args_schema: Type[BaseModel] = CasinoInput
+    return_direct: bool = False
 
-    def _run(self, game_id: str, bet_amount: float, options: dict[str, Any] | None = None) -> str:
-        with _client(self.api_key, self.base_url) as c:
-            kwargs = options or {}
-            result = c.play(game_id, bet_amount, **kwargs)
-        return json.dumps(result)
+    api_key: Optional[str] = None
+    referral_code: Optional[str] = None
+    base_url: str = "https://casino.purpleflea.com/api/v1"
 
+    def __init__(self, api_key: Optional[str] = None, referral_code: Optional[str] = None,
+                 base_url: str = "https://casino.purpleflea.com/api/v1", **kwargs):
+        super().__init__(**kwargs)
+        self.api_key = api_key
+        self.referral_code = referral_code
+        self.base_url = base_url
 
-class CasinoGetBalance(BaseTool):
-    """Check the Purple Flea casino wallet balance."""
+    def _headers(self):
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
 
-    name: str = "purpleflea_casino_get_balance"
-    description: str = (
-        "Retrieve the current wallet balance for the authenticated Purple Flea casino account. "
-        "Returns the balance amount and currency. Use this before placing bets to check "
-        "available funds, or after a game to see updated totals."
-    )
-    api_key: str = ""
-    base_url: Optional[str] = None
+    def _run(self, action: str, amount: Optional[float] = None,
+             game_params: Optional[dict] = None, bet_id: Optional[str] = None,
+             chain: Optional[str] = None) -> str:
+        try:
+            if action == "register":
+                payload = {}
+                if self.referral_code:
+                    payload["referral_code"] = self.referral_code
+                r = requests.post(f"{self.base_url}/auth/register", json=payload, timeout=30)
+                return json.dumps(r.json(), indent=2)
 
-    def _run(self) -> str:
-        with _client(self.api_key, self.base_url) as c:
-            result = c.get_balance()
-        return json.dumps(result)
+            elif action == "balance":
+                r = requests.get(f"{self.base_url}/auth/balance",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
+            elif action == "deposit_address":
+                payload = {"chain": chain or "base"}
+                r = requests.post(f"{self.base_url}/auth/deposit-address",
+                                  json=payload, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
-class CasinoDeposit(BaseTool):
-    """Deposit funds into the Purple Flea casino wallet."""
+            elif action == "withdraw":
+                r = requests.post(f"{self.base_url}/auth/withdraw",
+                                  json=game_params or {}, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
-    name: str = "purpleflea_casino_deposit"
-    description: str = (
-        "Deposit funds into the Purple Flea casino wallet. "
-        "Specify the amount and currency (defaults to USD). "
-        "Supported currencies include USD, USDC, ETH, BTC, and SOL. "
-        "Returns the updated wallet balance after the deposit."
-    )
-    args_schema: Type[BaseModel] = CasinoDepositInput
-    api_key: str = ""
-    base_url: Optional[str] = None
+            elif action == "referral_stats":
+                r = requests.get(f"{self.base_url}/auth/referral/stats",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
-    def _run(self, amount: float, currency: str = "USD") -> str:
-        with _client(self.api_key, self.base_url) as c:
-            result = c.deposit(amount, currency=currency)
-        return json.dumps(result)
+            elif action == "play_coin_flip":
+                payload = {"amount": amount or 1.0, **(game_params or {})}
+                r = requests.post(f"{self.base_url}/games/coin-flip",
+                                  json=payload, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
+            elif action == "play_dice":
+                payload = {"amount": amount or 1.0, **(game_params or {})}
+                r = requests.post(f"{self.base_url}/games/dice",
+                                  json=payload, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
-class CasinoWithdraw(BaseTool):
-    """Withdraw funds from the Purple Flea casino wallet."""
+            elif action == "play_multiplier":
+                payload = {"amount": amount or 1.0, **(game_params or {})}
+                r = requests.post(f"{self.base_url}/games/multiplier",
+                                  json=payload, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
-    name: str = "purpleflea_casino_withdraw"
-    description: str = (
-        "Withdraw funds from the Purple Flea casino wallet to your external wallet. "
-        "Specify the amount and currency (defaults to USD). "
-        "Returns the updated wallet balance after the withdrawal."
-    )
-    args_schema: Type[BaseModel] = CasinoWithdrawInput
-    api_key: str = ""
-    base_url: Optional[str] = None
+            elif action == "play_roulette":
+                payload = {"amount": amount or 1.0, **(game_params or {})}
+                r = requests.post(f"{self.base_url}/games/roulette",
+                                  json=payload, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
-    def _run(self, amount: float, currency: str = "USD") -> str:
-        with _client(self.api_key, self.base_url) as c:
-            result = c.withdraw(amount, currency=currency)
-        return json.dumps(result)
+            elif action == "play_crash":
+                payload = {"amount": amount or 1.0, **(game_params or {})}
+                r = requests.post(f"{self.base_url}/games/crash",
+                                  json=payload, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
+            elif action == "play_plinko":
+                payload = {"amount": amount or 1.0, **(game_params or {})}
+                r = requests.post(f"{self.base_url}/games/plinko",
+                                  json=payload, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
-class CasinoListGames(BaseTool):
-    """List available Purple Flea casino games."""
+            elif action == "kelly_optimal":
+                r = requests.post(f"{self.base_url}/kelly/optimal",
+                                  json=game_params or {}, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
-    name: str = "purpleflea_casino_list_games"
-    description: str = (
-        "List all available casino games on the Purple Flea platform. "
-        "Returns game IDs, names, descriptions, min/max bets, and house edge for each game. "
-        "Use this to discover which games are available before placing a bet."
-    )
-    api_key: str = ""
-    base_url: Optional[str] = None
+            elif action == "simulate":
+                r = requests.post(f"{self.base_url}/kelly/simulate",
+                                  json=game_params or {}, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
-    def _run(self) -> str:
-        with _client(self.api_key, self.base_url) as c:
-            result = c.list_games()
-        return json.dumps(result)
+            elif action == "verify_bet":
+                r = requests.post(f"{self.base_url}/fairness/verify",
+                                  json={"bet_id": bet_id}, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
+            elif action == "leaderboard":
+                r = requests.get(f"{self.base_url}/stats/leaderboard",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
 
-class CasinoGetGame(BaseTool):
-    """Get details for a specific Purple Flea casino game."""
+            else:
+                return json.dumps({"error": f"Unknown action: {action}. Valid actions: register, balance, play_coin_flip, play_dice, play_multiplier, play_roulette, play_crash, play_plinko, deposit_address, withdraw, referral_stats, kelly_optimal, simulate, verify_bet, leaderboard"})
 
-    name: str = "purpleflea_casino_get_game"
-    description: str = (
-        "Get detailed information about a specific Purple Flea casino game, "
-        "including rules, payout multipliers, house edge, min/max bet limits, "
-        "and accepted options. Provide the game_id (e.g. 'coin_flip', 'dice')."
-    )
-    args_schema: Type[BaseModel] = GameIdInput
-    api_key: str = ""
-    base_url: Optional[str] = None
-
-    def _run(self, game_id: str) -> str:
-        with _client(self.api_key, self.base_url) as c:
-            result = c.get_game(game_id)
-        return json.dumps(result)
-
-
-class CasinoGetGameHistory(BaseTool):
-    """Retrieve past Purple Flea casino game results."""
-
-    name: str = "purpleflea_casino_get_game_history"
-    description: str = (
-        "Retrieve the history of past casino game results for the authenticated account. "
-        "Returns bet amounts, outcomes, payouts, and timestamps. "
-        "Optionally filter by game_id or limit the number of results."
-    )
-    args_schema: Type[BaseModel] = GameHistoryInput
-    api_key: str = ""
-    base_url: Optional[str] = None
-
-    def _run(self, limit: int | None = None, game_id: str | None = None) -> str:
-        kwargs: dict[str, Any] = {}
-        if limit is not None:
-            kwargs["limit"] = limit
-        if game_id is not None:
-            kwargs["game_id"] = game_id
-        with _client(self.api_key, self.base_url) as c:
-            result = c.get_game_history(**kwargs)
-        return json.dumps(result)
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Request failed: {str(e)}"})
+        except Exception as e:
+            return json.dumps({"error": f"Unexpected error: {str(e)}"})

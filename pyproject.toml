@@ -1,52 +1,37 @@
 [build-system]
-requires = ["setuptools>=61.0,<70.0", "wheel"]
-build-backend = "setuptools.build_meta"
+requires = ["hatchling"]
+build-backend = "hatchling.build"
 
 [project]
 name = "langchain-purpleflea"
-version = "0.1.1"
+version = "0.1.0"
 description = "LangChain tools for Purple Flea — casino, trading, wallet, and domain APIs for AI agents"
 readme = "README.md"
 license = {text = "MIT"}
-requires-python = ">=3.10"
-authors = [
-    { name = "Purple Flea", email = "dev@purpleflea.com" },
-]
-keywords = [
-    "langchain", "ai-agents", "crypto", "casino", "trading",
-    "wallet", "domains", "mcp", "autonomous", "hyperliquid",
-    "perpetual-futures", "defi", "langchain-tools",
-]
+authors = [{name = "Purple Flea", email = "dev@purpleflea.com"}]
+keywords = ["langchain", "ai-agents", "crypto", "casino", "trading", "wallet", "domains", "mcp", "autonomous"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "Topic :: Software Development :: Libraries :: Python Modules",
-    "Topic :: Office/Business :: Financial :: Investment",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
+requires-python = ">=3.9"
 dependencies = [
-    "langchain-core>=0.2",
-    "purpleflea>=0.1",
+    "langchain-core>=0.1.0",
+    "requests>=2.28.0",
+    "pydantic>=2.0.0",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=7.0",
-    "pytest-cov",
-    "responses>=0.23",
-]
+dev = ["build", "twine", "pytest"]
 
 [project.urls]
 Homepage = "https://purpleflea.com"
+Documentation = "https://purpleflea.com/for-langchain"
 Repository = "https://github.com/purple-flea/langchain-purpleflea"
-Issues = "https://github.com/purple-flea/langchain-purpleflea/issues"
-
-[tool.setuptools.packages.find]
-include = ["langchain_purpleflea*"]
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]

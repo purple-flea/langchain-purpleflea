@@ -1,185 +1,217 @@
-"""LangChain tools for the Purple Flea Domains API."""
-
-from __future__ import annotations
+"""Purple Flea Domains tools for LangChain agents."""
 
 import json
-import urllib.request
-import urllib.error
-from typing import Any, Optional, Type
-
-from langchain_core.tools import BaseTool
+import requests
+from typing import Optional, Type
+from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
-
-BASE_URL = "https://domains.purpleflea.com"
-
-
-def _post(base_url: str, path: str, api_key: str, payload: dict) -> dict:
-    url = f"{base_url.rstrip('/')}{path}"
-    data = json.dumps(payload).encode()
-    req = urllib.request.Request(
-        url, data=data,
-        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        return {"error": e.reason, "status": e.code, "body": e.read().decode()}
-
-
-def _get(base_url: str, path: str, api_key: str) -> dict:
-    url = f"{base_url.rstrip('/')}{path}"
-    req = urllib.request.Request(
-        url,
-        headers={"Authorization": f"Bearer {api_key}"},
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            return json.loads(resp.read())
-    except urllib.error.HTTPError as e:
-        return {"error": e.reason, "status": e.code, "body": e.read().decode()}
-
-
-# ---------------------------------------------------------------------------
-# Input schemas
-# ---------------------------------------------------------------------------
 
 
 class DomainSearchInput(BaseModel):
-    query: str = Field(
-        description="Domain name to search for availability (e.g. 'myagent.ai', 'myagent'). "
-                    "Can be a full domain with TLD or just a name to check across multiple TLDs."
-    )
-    tlds: Optional[list[str]] = Field(
-        default=None,
-        description="Optional list of TLDs to check (e.g. ['com', 'ai', 'io', 'xyz']). "
-                    "If not specified, checks all supported TLDs.",
-    )
+    query: str = Field(description="Domain name to search (e.g. 'myagent.com' or just 'myagent')")
+    check_only: bool = Field(default=False, description="If True, just check availability of exact domain")
 
 
 class DomainPurchaseInput(BaseModel):
-    domain: str = Field(
-        description="The full domain name to purchase (e.g. 'myagent.ai')."
-    )
-    years: Optional[int] = Field(
-        default=1,
-        description="Number of years to register the domain (1-10). Default: 1.",
-    )
-    auto_renew: Optional[bool] = Field(
-        default=True,
-        description="Whether to automatically renew the domain before expiry. Default: True.",
-    )
+    action: str = Field(description="Action: register (purchase domain), list (your domains), account, referral_stats")
+    domain: Optional[str] = Field(default=None, description="Domain to register (e.g. 'myagent.com')")
 
 
-class DNSAddRecordInput(BaseModel):
-    domain: str = Field(description="The domain to add a DNS record to (e.g. 'myagent.ai').")
-    record_type: str = Field(
-        description="DNS record type: 'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'NS', 'SRV'."
-    )
-    name: str = Field(
-        description="Record name (subdomain). Use '@' for root domain, or 'www', 'api', etc."
-    )
-    value: str = Field(
-        description="Record value (e.g. IP address for A records, hostname for CNAME)."
-    )
-    ttl: Optional[int] = Field(
-        default=3600,
-        description="TTL in seconds. Default: 3600 (1 hour).",
-    )
-
-
-class DomainNameInput(BaseModel):
-    domain: str = Field(description="The full domain name (e.g. 'myagent.ai').")
-
-
-# ---------------------------------------------------------------------------
-# Tools
-# ---------------------------------------------------------------------------
+class DNSInput(BaseModel):
+    action: str = Field(description="Action: add, list, update, delete")
+    domain_id: Optional[str] = Field(default=None, description="Domain ID from your domains list")
+    record_type: Optional[str] = Field(default=None, description="DNS record type: A, AAAA, CNAME, MX, TXT")
+    name: Optional[str] = Field(default=None, description="Record name (e.g. '@', 'www', 'mail')")
+    content: Optional[str] = Field(default=None, description="Record value (IP, hostname, text)")
+    record_id: Optional[str] = Field(default=None, description="Record ID for update/delete")
 
 
 class DomainSearchTool(BaseTool):
-    """Search domain name availability via Purple Flea Domains."""
+    """LangChain tool for searching domain availability via Purple Flea Domains."""
 
-    name: str = "purpleflea_domain_search"
+    name: str = "purple_flea_domain_search"
     description: str = (
-        "Search for domain name availability using the Purple Flea Domains API. "
-        "Check if a domain is available for registration across .com, .ai, .io, .xyz, .app, and 500+ TLDs. "
-        "Returns availability status, registration price, and renewal cost for each TLD. "
-        "Use this to find a unique domain for a project, service, or autonomous agent identity."
+        "Search for available domain names via Purple Flea Domains (powered by Njalla). "
+        "Privacy-first domain registration — no personal data required. "
+        "Search returns availability and pricing. 20% markup on Njalla base prices. "
+        "Referral system: earn 15% of domain purchases from referred agents. "
+        "Perfect for agents that need a web presence or handle web3 infrastructure."
     )
     args_schema: Type[BaseModel] = DomainSearchInput
-    api_key: str = ""
-    base_url: str = BASE_URL
+    return_direct: bool = False
 
-    def _run(self, query: str, tlds: Optional[list[str]] = None) -> str:
-        payload: dict[str, Any] = {"query": query}
-        if tlds:
-            payload["tlds"] = tlds
-        result = _post(self.base_url, "/v1/domains/search", self.api_key, payload)
-        return json.dumps(result)
+    api_key: Optional[str] = None
+    base_url: str = "https://domains.purpleflea.com/v1"
+
+    def __init__(self, api_key: Optional[str] = None,
+                 base_url: str = "https://domains.purpleflea.com/v1", **kwargs):
+        super().__init__(**kwargs)
+        self.api_key = api_key
+        self.base_url = base_url
+
+    def _headers(self):
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def _run(self, query: str, check_only: bool = False) -> str:
+        try:
+            if check_only:
+                r = requests.get(f"{self.base_url}/domains/check",
+                                 params={"domain": query},
+                                 headers=self._headers(), timeout=30)
+            else:
+                r = requests.get(f"{self.base_url}/domains/search",
+                                 params={"q": query},
+                                 headers=self._headers(), timeout=30)
+            return json.dumps(r.json(), indent=2)
+
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Request failed: {str(e)}"})
+        except Exception as e:
+            return json.dumps({"error": f"Unexpected error: {str(e)}"})
 
 
 class DomainPurchaseTool(BaseTool):
-    """Register a domain name via Purple Flea Domains."""
+    """LangChain tool for purchasing and managing domains via Purple Flea."""
 
-    name: str = "purpleflea_domain_purchase"
+    name: str = "purple_flea_domain_purchase"
     description: str = (
-        "Register (purchase) a domain name using the Purple Flea Domains API. "
-        "Supports 500+ TLDs including .com, .ai, .io, .xyz, .app, .dev, .agent, .bot. "
-        "Returns confirmation, expiry date, and nameserver details. "
-        "Use this to claim a domain identity for an agent, project, or service. "
-        "Auto-renewal is enabled by default to prevent expiry."
+        "Register and manage domains via Purple Flea Domains. "
+        "Register available domains, list your existing domains, check account balance. "
+        "Privacy-first: no personal data required for registration. "
+        "Actions: register (domain param required), list, account, referral_stats"
     )
     args_schema: Type[BaseModel] = DomainPurchaseInput
-    api_key: str = ""
-    base_url: str = BASE_URL
+    return_direct: bool = False
 
-    def _run(
-        self,
-        domain: str,
-        years: int = 1,
-        auto_renew: bool = True,
-    ) -> str:
-        payload: dict[str, Any] = {
-            "domain": domain,
-            "years": years,
-            "auto_renew": auto_renew,
-        }
-        result = _post(self.base_url, "/v1/domains/register", self.api_key, payload)
-        return json.dumps(result)
+    api_key: Optional[str] = None
+    referral_code: Optional[str] = None
+    base_url: str = "https://domains.purpleflea.com/v1"
+
+    def __init__(self, api_key: Optional[str] = None, referral_code: Optional[str] = None,
+                 base_url: str = "https://domains.purpleflea.com/v1", **kwargs):
+        super().__init__(**kwargs)
+        self.api_key = api_key
+        self.referral_code = referral_code
+        self.base_url = base_url
+
+    def _headers(self):
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def _run(self, action: str, domain: Optional[str] = None) -> str:
+        try:
+            if action == "register":
+                if not self.api_key:
+                    payload = {}
+                    if self.referral_code:
+                        payload["referral_code"] = self.referral_code
+                    reg_r = requests.post(f"{self.base_url}/auth/register", json=payload, timeout=30)
+                    return json.dumps({"message": "Register first to get API key", "result": reg_r.json()}, indent=2)
+                payload = {"domain": domain}
+                r = requests.post(f"{self.base_url}/domains/register",
+                                  json=payload, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "list":
+                r = requests.get(f"{self.base_url}/domains",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "account":
+                r = requests.get(f"{self.base_url}/auth/account",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "referral_stats":
+                r = requests.get(f"{self.base_url}/referral/stats",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            else:
+                return json.dumps({"error": f"Unknown action: {action}"})
+
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Request failed: {str(e)}"})
+        except Exception as e:
+            return json.dumps({"error": f"Unexpected error: {str(e)}"})
 
 
 class DNSTool(BaseTool):
-    """Add a DNS record to a Purple Flea managed domain."""
+    """LangChain tool for managing DNS records via Purple Flea Domains."""
 
-    name: str = "purpleflea_domain_add_dns_record"
+    name: str = "purple_flea_dns"
     description: str = (
-        "Add a DNS record to a domain managed via Purple Flea Domains. "
-        "Supports A, AAAA, CNAME, MX, TXT, NS, and SRV record types. "
-        "Changes propagate globally within 60 seconds. "
-        "Use this to point a domain to a server, configure email, verify ownership, "
-        "or set up any DNS-based service for an agent-owned domain."
+        "Manage DNS records for your Purple Flea domains. "
+        "Supported record types: A, AAAA, CNAME, MX, TXT. "
+        "Actions: add (requires domain_id, record_type, name, content), "
+        "list (requires domain_id), update (requires record_id + new values), "
+        "delete (requires record_id)"
     )
-    args_schema: Type[BaseModel] = DNSAddRecordInput
-    api_key: str = ""
-    base_url: str = BASE_URL
+    args_schema: Type[BaseModel] = DNSInput
+    return_direct: bool = False
 
-    def _run(
-        self,
-        domain: str,
-        record_type: str,
-        name: str,
-        value: str,
-        ttl: int = 3600,
-    ) -> str:
-        payload: dict[str, Any] = {
-            "domain": domain,
-            "type": record_type,
-            "name": name,
-            "value": value,
-            "ttl": ttl,
-        }
-        result = _post(self.base_url, f"/v1/domains/{domain}/records", self.api_key, payload)
-        return json.dumps(result)
+    api_key: Optional[str] = None
+    base_url: str = "https://domains.purpleflea.com/v1"
+
+    def __init__(self, api_key: Optional[str] = None,
+                 base_url: str = "https://domains.purpleflea.com/v1", **kwargs):
+        super().__init__(**kwargs)
+        self.api_key = api_key
+        self.base_url = base_url
+
+    def _headers(self):
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def _run(self, action: str, domain_id: Optional[str] = None,
+             record_type: Optional[str] = None, name: Optional[str] = None,
+             content: Optional[str] = None, record_id: Optional[str] = None) -> str:
+        try:
+            if action == "add":
+                payload = {
+                    "domain_id": domain_id,
+                    "type": record_type,
+                    "name": name,
+                    "content": content,
+                }
+                r = requests.post(f"{self.base_url}/dns/records",
+                                  json=payload, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "list":
+                r = requests.get(f"{self.base_url}/dns/records",
+                                 params={"domain_id": domain_id},
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "update":
+                payload = {}
+                if record_type:
+                    payload["type"] = record_type
+                if name:
+                    payload["name"] = name
+                if content:
+                    payload["content"] = content
+                r = requests.put(f"{self.base_url}/dns/records/{record_id}",
+                                 json=payload, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "delete":
+                r = requests.delete(f"{self.base_url}/dns/records/{record_id}",
+                                    headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            else:
+                return json.dumps({"error": f"Unknown action: {action}"})
+
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Request failed: {str(e)}"})
+        except Exception as e:
+            return json.dumps({"error": f"Unexpected error: {str(e)}"})

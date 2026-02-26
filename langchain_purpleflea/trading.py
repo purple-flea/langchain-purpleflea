@@ -1,215 +1,234 @@
-"""LangChain tools for the Purple Flea Trading API."""
-
-from __future__ import annotations
+"""Purple Flea Trading tools for LangChain agents."""
 
 import json
-from typing import Any, Optional, Type
-
-from langchain_core.tools import BaseTool
+import requests
+from typing import Optional, Type
+from langchain.tools import BaseTool
 from pydantic import BaseModel, Field
-from purpleflea import TradingClient
 
 
-def _client(api_key: str, base_url: str | None = None) -> TradingClient:
-    return TradingClient(api_key, base_url=base_url)
-
-
-# ---------------------------------------------------------------------------
-# Input schemas
-# ---------------------------------------------------------------------------
-
-
-class OpenPositionInput(BaseModel):
-    market_id: str = Field(
+class TradingInput(BaseModel):
+    action: str = Field(
         description=(
-            "The market to trade on (e.g. 'BTC-USD', 'ETH-USD', 'TSLA-PERP', 'GOLD-PERP'). "
-            "Use the list_markets tool to see all available markets."
+            "Action to perform. One of: register, account, open_position, close_position, "
+            "positions, history, portfolio, referral_stats"
         )
     )
-    side: str = Field(
-        description="Trade direction: 'long' to bet on price going up, 'short' to bet on price going down."
-    )
-    size: float = Field(
-        description="Position size in USD notional value. Must be a positive number."
-    )
-    leverage: Optional[int] = Field(
+    coin: Optional[str] = Field(default=None, description="Market symbol e.g. BTC, TSLA, GOLD")
+    side: Optional[str] = Field(default=None, description="long or short")
+    size_usd: Optional[float] = Field(default=None, description="Position size in USD")
+    leverage: Optional[int] = Field(default=None, description="Leverage multiplier (1-50)")
+    position_id: Optional[str] = Field(default=None, description="Position ID for closing")
+    hl_wallet_address: Optional[str] = Field(default=None, description="Hyperliquid wallet address for registration")
+    hl_signing_key: Optional[str] = Field(default=None, description="Hyperliquid signing key for registration")
+
+
+class MarketsInput(BaseModel):
+    category: Optional[str] = Field(
         default=None,
-        description="Leverage multiplier (1-50). Higher leverage amplifies both gains and losses. Defaults to 1 (no leverage).",
+        description="Market category: stocks, commodities, crypto, forex, rwa, or leave empty for all"
     )
+    coin: Optional[str] = Field(default=None, description="Specific coin symbol for details/price")
 
 
-class ClosePositionInput(BaseModel):
-    position_id: str = Field(
-        description="The unique ID of the open position to close. Get this from open_position or list_positions."
-    )
+class PositionsInput(BaseModel):
+    action: str = Field(description="One of: list, portfolio, history")
+    limit: Optional[int] = Field(default=50, description="Number of history entries (max 200)")
 
 
-class MarketIdInput(BaseModel):
-    market_id: str = Field(
-        description="The market identifier (e.g. 'BTC-USD', 'TSLA-PERP')."
-    )
+class TradingTool(BaseTool):
+    """LangChain tool for autonomous trading via Purple Flea Trading API."""
 
-
-class PositionIdInput(BaseModel):
-    position_id: str = Field(description="The unique ID of the position to look up.")
-
-
-class ListPositionsInput(BaseModel):
-    status: Optional[str] = Field(
-        default=None,
-        description="Filter by position status: 'open', 'closed', or 'all'. Defaults to 'open'.",
-    )
-
-
-# ---------------------------------------------------------------------------
-# Tools
-# ---------------------------------------------------------------------------
-
-
-class TradingOpenPosition(BaseTool):
-    """Open a leveraged trading position on Purple Flea."""
-
-    name: str = "purpleflea_trading_open_position"
+    name: str = "purple_flea_trading"
     description: str = (
-        "Open a new perpetual futures trading position on the Purple Flea platform. "
-        "Supports 275+ markets including stocks (TSLA, NVDA, AAPL), crypto (BTC, ETH, SOL), "
-        "commodities (GOLD, OIL), and forex (EUR/USD). "
-        "Specify market_id, side ('long' or 'short'), size in USD, and optional leverage (1-50x). "
-        "Returns the position ID, entry price, liquidation price, and margin required."
+        "Trade 275+ perpetual futures markets via Purple Flea Trading (powered by Hyperliquid). "
+        "Markets include stocks (TSLA, NVDA, AAPL), commodities (GOLD, SILVER, OIL), "
+        "crypto (BTC, ETH, SOL), forex (EUR, JPY), and indices (SPX, JP225). "
+        "Leverage up to 50x. Real on-chain execution. Earn 20% of referred agents' trading fees. "
+        "Actions: register (needs hl_wallet_address + hl_signing_key), account, open_position "
+        "(coin, side, size_usd, leverage), close_position (position_id), positions, history, "
+        "portfolio, referral_stats"
     )
-    args_schema: Type[BaseModel] = OpenPositionInput
-    api_key: str = ""
-    base_url: Optional[str] = None
+    args_schema: Type[BaseModel] = TradingInput
+    return_direct: bool = False
 
-    def _run(
-        self,
-        market_id: str,
-        side: str,
-        size: float,
-        leverage: int | None = None,
-    ) -> str:
-        kwargs: dict[str, Any] = {}
-        if leverage is not None:
-            kwargs["leverage"] = leverage
-        with _client(self.api_key, self.base_url) as c:
-            result = c.open_position(market_id, side, size, **kwargs)
-        return json.dumps(result)
+    api_key: Optional[str] = None
+    referral_code: Optional[str] = None
+    base_url: str = "https://trading.purpleflea.com/v1"
+
+    def __init__(self, api_key: Optional[str] = None, referral_code: Optional[str] = None,
+                 base_url: str = "https://trading.purpleflea.com/v1", **kwargs):
+        super().__init__(**kwargs)
+        self.api_key = api_key
+        self.referral_code = referral_code
+        self.base_url = base_url
+
+    def _headers(self):
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def _run(self, action: str, coin: Optional[str] = None, side: Optional[str] = None,
+             size_usd: Optional[float] = None, leverage: Optional[int] = None,
+             position_id: Optional[str] = None, hl_wallet_address: Optional[str] = None,
+             hl_signing_key: Optional[str] = None) -> str:
+        try:
+            if action == "register":
+                payload = {
+                    "hl_wallet_address": hl_wallet_address,
+                    "hl_signing_key": hl_signing_key,
+                }
+                if self.referral_code:
+                    payload["referral_code"] = self.referral_code
+                r = requests.post(f"{self.base_url}/auth/register", json=payload, timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "account":
+                r = requests.get(f"{self.base_url}/auth/account",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "open_position":
+                payload = {
+                    "coin": coin,
+                    "side": side,
+                    "size_usd": size_usd,
+                    "leverage": leverage or 1,
+                }
+                r = requests.post(f"{self.base_url}/trade/open",
+                                  json=payload, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "close_position":
+                r = requests.post(f"{self.base_url}/trade/close",
+                                  json={"position_id": position_id},
+                                  headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "positions":
+                r = requests.get(f"{self.base_url}/trade/positions",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "history":
+                r = requests.get(f"{self.base_url}/trade/history",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "portfolio":
+                r = requests.get(f"{self.base_url}/trade/portfolio",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            elif action == "referral_stats":
+                r = requests.get(f"{self.base_url}/referral/stats",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+            else:
+                return json.dumps({"error": f"Unknown action: {action}"})
+
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Request failed: {str(e)}"})
+        except Exception as e:
+            return json.dumps({"error": f"Unexpected error: {str(e)}"})
 
 
-class TradingClosePosition(BaseTool):
-    """Close an open trading position on Purple Flea."""
+class MarketsTool(BaseTool):
+    """LangChain tool for browsing Purple Flea Trading markets."""
 
-    name: str = "purpleflea_trading_close_position"
+    name: str = "purple_flea_markets"
     description: str = (
-        "Close an existing perpetual futures position on Purple Flea. "
-        "Provide the position_id obtained from open_position or list_positions. "
-        "Returns the closing price, realized PnL, and final settlement details."
+        "Browse 275+ perpetual futures markets on Purple Flea Trading. "
+        "Get real-time prices, market details, and trading signals. "
+        "Categories: stocks, commodities, crypto, forex, rwa (real-world assets). "
+        "Use category parameter to filter, or coin parameter for specific market info/price."
     )
-    args_schema: Type[BaseModel] = ClosePositionInput
-    api_key: str = ""
-    base_url: Optional[str] = None
+    args_schema: Type[BaseModel] = MarketsInput
+    return_direct: bool = False
 
-    def _run(self, position_id: str) -> str:
-        with _client(self.api_key, self.base_url) as c:
-            result = c.close_position(position_id)
-        return json.dumps(result)
+    api_key: Optional[str] = None
+    base_url: str = "https://trading.purpleflea.com/v1"
+
+    def __init__(self, api_key: Optional[str] = None,
+                 base_url: str = "https://trading.purpleflea.com/v1", **kwargs):
+        super().__init__(**kwargs)
+        self.api_key = api_key
+        self.base_url = base_url
+
+    def _headers(self):
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
+
+    def _run(self, category: Optional[str] = None, coin: Optional[str] = None) -> str:
+        try:
+            if coin:
+                r = requests.get(f"{self.base_url}/markets/{coin.upper()}",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+            elif category:
+                r = requests.get(f"{self.base_url}/markets/{category}",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+            else:
+                r = requests.get(f"{self.base_url}/markets",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Request failed: {str(e)}"})
+        except Exception as e:
+            return json.dumps({"error": f"Unexpected error: {str(e)}"})
 
 
-class TradingGetPosition(BaseTool):
-    """Get details of a specific trading position."""
+class PositionsTool(BaseTool):
+    """LangChain tool for viewing Purple Flea Trading positions."""
 
-    name: str = "purpleflea_trading_get_position"
+    name: str = "purple_flea_positions"
     description: str = (
-        "Get detailed information about a specific Purple Flea trading position, "
-        "including entry price, current price, unrealized PnL, margin, leverage, "
-        "and liquidation price. Provide the position_id."
+        "View and manage your Purple Flea Trading positions. "
+        "List open positions with unrealized P&L, view trade history, "
+        "or get full portfolio snapshot with exposure metrics."
     )
-    args_schema: Type[BaseModel] = PositionIdInput
-    api_key: str = ""
-    base_url: Optional[str] = None
+    args_schema: Type[BaseModel] = PositionsInput
+    return_direct: bool = False
 
-    def _run(self, position_id: str) -> str:
-        with _client(self.api_key, self.base_url) as c:
-            result = c.get_position(position_id)
-        return json.dumps(result)
+    api_key: Optional[str] = None
+    base_url: str = "https://trading.purpleflea.com/v1"
 
+    def __init__(self, api_key: Optional[str] = None,
+                 base_url: str = "https://trading.purpleflea.com/v1", **kwargs):
+        super().__init__(**kwargs)
+        self.api_key = api_key
+        self.base_url = base_url
 
-class TradingListPositions(BaseTool):
-    """List open trading positions on Purple Flea."""
+    def _headers(self):
+        headers = {"Content-Type": "application/json"}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+        return headers
 
-    name: str = "purpleflea_trading_list_positions"
-    description: str = (
-        "List all trading positions on the authenticated Purple Flea account. "
-        "Returns position IDs, markets, sides, sizes, entry prices, and unrealized PnL. "
-        "Optionally filter by status ('open', 'closed', 'all'). "
-        "Use this to review your portfolio before opening or closing positions."
-    )
-    args_schema: Type[BaseModel] = ListPositionsInput
-    api_key: str = ""
-    base_url: Optional[str] = None
+    def _run(self, action: str, limit: Optional[int] = 50) -> str:
+        try:
+            if action == "list":
+                r = requests.get(f"{self.base_url}/trade/positions",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+            elif action == "portfolio":
+                r = requests.get(f"{self.base_url}/trade/portfolio",
+                                 headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+            elif action == "history":
+                r = requests.get(f"{self.base_url}/trade/history",
+                                 params={"limit": limit}, headers=self._headers(), timeout=30)
+                return json.dumps(r.json(), indent=2)
+            else:
+                return json.dumps({"error": f"Unknown action: {action}"})
 
-    def _run(self, status: str | None = None) -> str:
-        kwargs: dict[str, Any] = {}
-        if status is not None:
-            kwargs["status"] = status
-        with _client(self.api_key, self.base_url) as c:
-            result = c.list_positions(**kwargs)
-        return json.dumps(result)
-
-
-class TradingListMarkets(BaseTool):
-    """List available trading markets on Purple Flea."""
-
-    name: str = "purpleflea_trading_list_markets"
-    description: str = (
-        "List all available perpetual futures markets on Purple Flea. "
-        "Returns market IDs, names, current prices, 24h volume, and funding rates. "
-        "Covers 275+ markets: stocks (TSLA-PERP, NVDA-PERP), crypto (BTC-USD, ETH-USD), "
-        "commodities (GOLD-PERP), and forex. "
-        "Use this to discover tradeable markets before opening a position."
-    )
-    api_key: str = ""
-    base_url: Optional[str] = None
-
-    def _run(self) -> str:
-        with _client(self.api_key, self.base_url) as c:
-            result = c.list_markets()
-        return json.dumps(result)
-
-
-class TradingGetMarket(BaseTool):
-    """Get details for a specific trading market."""
-
-    name: str = "purpleflea_trading_get_market"
-    description: str = (
-        "Get detailed information about a specific Purple Flea trading market, "
-        "including current price, 24h high/low, volume, funding rate, open interest, "
-        "and available leverage. Provide the market_id (e.g. 'BTC-USD')."
-    )
-    args_schema: Type[BaseModel] = MarketIdInput
-    api_key: str = ""
-    base_url: Optional[str] = None
-
-    def _run(self, market_id: str) -> str:
-        with _client(self.api_key, self.base_url) as c:
-            result = c.get_market(market_id)
-        return json.dumps(result)
-
-
-class TradingGetOrderbook(BaseTool):
-    """Get the order book for a Purple Flea trading market."""
-
-    name: str = "purpleflea_trading_get_orderbook"
-    description: str = (
-        "Retrieve the current order book (bids and asks) for a Purple Flea trading market. "
-        "Returns price levels and quantities for both buy and sell sides. "
-        "Useful for assessing market depth and liquidity before placing a trade."
-    )
-    args_schema: Type[BaseModel] = MarketIdInput
-    api_key: str = ""
-    base_url: Optional[str] = None
-
-    def _run(self, market_id: str) -> str:
-        with _client(self.api_key, self.base_url) as c:
-            result = c.get_orderbook(market_id)
-        return json.dumps(result)
+        except requests.RequestException as e:
+            return json.dumps({"error": f"Request failed: {str(e)}"})
+        except Exception as e:
+            return json.dumps({"error": f"Unexpected error: {str(e)}"})
